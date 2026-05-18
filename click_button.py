@@ -4,18 +4,27 @@ import re
 import time
 import random
 import getpass
+import platform
+import glob
+
 # pyrefly: ignore [missing-import]
 from dataclasses import dataclass
 # pyrefly: ignore [missing-import]
 from selenium import webdriver
 # pyrefly: ignore [missing-import]
-from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+# pyrefly: ignore [missing-import]
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
 # pyrefly: ignore [missing-import]
 from selenium.webdriver.common.by import By
 # pyrefly: ignore [missing-import]
 from selenium.webdriver.support.ui import WebDriverWait
 # pyrefly: ignore [missing-import]
 from selenium.webdriver.support import expected_conditions as EC
+# pyrefly: ignore [missing-import]
+from selenium.webdriver.common.action_chains import ActionChains
+# pyrefly: ignore [missing-import]
+from selenium.common.exceptions import StaleElementReferenceException
 
 try:
     import pyautogui
@@ -132,75 +141,132 @@ def load_env_configurations():
         except Exception as e:
             print(f"{Colors.RED}✘{Colors.END} {Colors.BOLD}[.env Read Error]{Colors.END} Could not parse .env file: {e}")
 
-def setup_driver(headless: bool = False) -> webdriver.Chrome:
-    "fucking driver do caralho"
-    chrome_options = Options()
-    if headless:
-        chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--window-size=1280,800")
-    
-
-    # pega o dir do chrome no subfolder src
+def setup_driver(headless: bool = False):
+    """
+    [PHANTOM] Elite browser initialization module.
+    Features:
+      - Cross-platform local profile resolution (Windows/Linux)
+      - Chromium CDP deep-stealth patch injections
+      - Automatic Gecko/Firefox fallback with equivalent stealth parameters
+    """
+    os_name = platform.system()
     workspace_dir = os.path.abspath(os.path.dirname(__file__))
-    src_profile_path = os.path.join(workspace_dir, "src", "Default")
-    if os.path.exists(src_profile_path):
-        src_dir = os.path.join(workspace_dir, "src")
-        print(f"\n{Colors.BLUE}🌐{Colors.END} {Colors.BOLD}[Chrome Profile]{Colors.END} Detected custom 'Default' profile inside src. Loading persistent session from: {Colors.DIM}{src_dir}{Colors.END}")
-        chrome_options.add_argument(f"--user-data-dir={src_dir}")
-        chrome_options.add_argument("--profile-directory=Default")
-    else:
-        # Fallback to root Default folder if exists
-        default_profile_path = os.path.join(workspace_dir, "Default")
-        if os.path.exists(default_profile_path):
-            print(f"\n{Colors.BLUE}🌐{Colors.END} {Colors.BOLD}[Chrome Profile]{Colors.END} Detected custom 'Default' profile. Loading persistent session from: {Colors.DIM}{workspace_dir}{Colors.END}")
+    
+    # -------------------------------------------------------------------------
+    # 1. ATTEMPT CHROMIUM STEALTH INITIALIZATION
+    # -------------------------------------------------------------------------
+    try:
+        chrome_options = ChromeOptions()
+        if headless:
+            chrome_options.add_argument("--headless=new")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--window-size=1280,800")
+        
+        # Profile resolution logic
+        src_profile = os.path.join(workspace_dir, "src", "Default")
+        local_profile = os.path.join(workspace_dir, "Default")
+        
+        # OS-specific default Chrome profiles
+        system_profile = None
+        if os_name == "Windows":
+            system_profile = os.path.expanduser("~\\AppData\\Local\\Google\\Chrome\\User Data")
+        elif os_name == "Linux":
+            system_profile = os.path.expanduser("~/.config/google-chrome")
+            
+        if os.path.exists(src_profile):
+            print(f"\n{Colors.BLUE}🌐{Colors.END} {Colors.BOLD}[Chrome]{Colors.END} Detected local 'src' profile.")
+            chrome_options.add_argument(f"--user-data-dir={os.path.join(workspace_dir, 'src')}")
+            chrome_options.add_argument("--profile-directory=Default")
+        elif os.path.exists(local_profile):
+            print(f"\n{Colors.BLUE}🌐{Colors.END} {Colors.BOLD}[Chrome]{Colors.END} Detected local workspace 'Default' profile.")
             chrome_options.add_argument(f"--user-data-dir={workspace_dir}")
             chrome_options.add_argument("--profile-directory=Default")
-    
-    # -------------------------------------------------------------------------
-    # ANTI-DETECTION (STEALTH) CONFIGURATIONS (FUNCIONA PORRA)
-    # -------------------------------------------------------------------------
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    
-    # pra escapar de flaggin
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    
-    # Super Ultra Mega realistic, modern Linux Chrome User-Agent 
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    chrome_options.add_experimental_option("prefs", {
-        "credentials_enable_service": False,
-        "profile.password_manager_enabled": False
-    })
-    driver = webdriver.Chrome(options=chrome_options)
-    
-    # Overwrite navigator.webdriver to 'undefined' on page-load before any website script runs
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-    })
-    
-    # Fake standard browser features (plugins count, languages, webgl) to bypass advanced fingerprinting
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": """
-            // Overwrite languages
-            Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR', 'pt', 'en-US', 'en']});
-            // Overwrite plugins count to look real
+        elif system_profile and os.path.exists(system_profile):
+            print(f"\n{Colors.BLUE}🌐{Colors.END} {Colors.BOLD}[Chrome]{Colors.END} Detected System Chrome Profile at {Colors.DIM}{system_profile}{Colors.END}")
+            chrome_options.add_argument(f"--user-data-dir={system_profile}")
+            chrome_options.add_argument("--profile-directory=Default")
+            
+        # --- PHANTOM: Deep Anti-Bot CDP Evasions ---
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        
+        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" if os_name == "Windows" else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        chrome_options.add_argument(f"user-agent={ua}")
+        
+        chrome_options.add_experimental_option("prefs", {
+            "credentials_enable_service": False,
+            "profile.password_manager_enabled": False
+        })
+        
+        driver = webdriver.Chrome(options=chrome_options)
+        
+        # CDP Inject: Overwrite Webdriver, WebGL, Plugins, and Languages on EVERY page load
+        stealth_js = """
+            // Erase webdriver flag
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            
+            // Spoof Plugins to bypass fingerprinting (Chrome PDF Viewer etc)
             Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-            // Overwrite WebGL renderer info to look like a standard GPU instead of virtualized drivers
+            
+            // Set languages natively
+            Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR', 'pt', 'en-US', 'en']});
+            
+            // Mask WebGL Renderer (Intel Iris / standard GPU instead of SwiftShader/virtual)
             const getParameter = WebGLRenderingContext.prototype.getParameter;
             WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                if (parameter === 37445) return 'Intel Open Source Technology Center';
-                if (parameter === 37446) return 'Mesa DRI Intel(R) HD Graphics 620 (Kaby Lake GT2)';
+                if (parameter === 37445) return 'Intel Inc.';
+                if (parameter === 37446) return 'Intel Iris OpenGL Engine';
                 return getParameter.apply(this, arguments);
             };
+            
+            // Inject fake window.chrome object
+            window.chrome = {
+                app: { isInstalled: false },
+                webstore: { onInstallStageChanged: {}, onDownloadProgress: {} },
+                runtime: { PlatformOs: { MAC: 'mac', WIN: 'win', ANDROID: 'android', CROS: 'cros', LINUX: 'linux', OPENBSD: 'openbsd' } }
+            };
         """
-    })
-    
-
-
-    # if that mf does not work... 
-    return driver
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": stealth_js})
+        
+        return driver
+        
+    except Exception as chrome_err:
+        print(f"\n{Colors.YELLOW}⚠️ [Fallback]{Colors.END} Chromium initialization failed: {chrome_err}")
+        print(f"{Colors.CYAN}➤{Colors.END} Initializing Mozilla Firefox (Gecko) fallback with stealth configurations...")
+        
+        # -------------------------------------------------------------------------
+        # 2. ATTEMPT FIREFOX (GECKO) STEALTH FALLBACK
+        # -------------------------------------------------------------------------
+        firefox_options = FirefoxOptions()
+        if headless:
+            firefox_options.add_argument("--headless")
+            
+        # Firefox Anti-Bot properties
+        firefox_options.set_preference("dom.webdriver.enabled", False)
+        firefox_options.set_preference("useAutomationExtension", False)
+        firefox_options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0")
+        firefox_options.set_preference("webgl.disabled", False)
+        firefox_options.set_preference("webgl.renderer-string-override", "Intel Iris OpenGL Engine")
+        firefox_options.set_preference("webgl.vendor-string-override", "Intel Inc.")
+        
+        # Attempt to load Firefox profile
+        ff_profile_dir = None
+        if os_name == "Windows":
+            ff_profile_dir = os.path.expanduser("~\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles")
+        elif os_name == "Linux":
+            ff_profile_dir = os.path.expanduser("~/.mozilla/firefox")
+            
+        if ff_profile_dir and os.path.exists(ff_profile_dir):
+            profiles = glob.glob(os.path.join(ff_profile_dir, "*.default*"))
+            if profiles:
+                print(f"  {Colors.GREEN}✔{Colors.END} Found native Firefox profile: {Colors.DIM}{profiles[0]}{Colors.END}")
+                firefox_options.add_argument("-profile")
+                firefox_options.add_argument(profiles[0])
+                
+        driver = webdriver.Firefox(options=firefox_options)
+        return driver
 
 def highlight_element(driver, element, color="#ff4393"):
     #obs, eu tentei nao usar isso, mas pqp... 
@@ -571,25 +637,45 @@ def process_page_buttons(driver) -> int:
         EC.presence_of_element_located((By.TAG_NAME, "body"))
     )
     
-    # Locate all job card items (li tags) on the page
-    cards = driver.find_elements(By.XPATH, "//li[@data-offer-item]")
+    # 1. Count the total valid items on the page to set our loop boundary
+    initial_cards = driver.find_elements(By.XPATH, "//li[@data-offer-item]")
+    total_cards_count = len(initial_cards)
     
-    # Filter only cards that contain a clickable "Quero me candidatar" button
-    valid_targets = []
-    for card in cards:
-        buttons = card.find_elements(By.XPATH, ".//button[contains(text(), 'Quero me candidatar')]")
-        if buttons:
-            valid_targets.append((card, buttons[0]))
+    # Pre-scan just to get an accurate total_valid count for the UI
+    total_valid = 0
+    for card in initial_cards:
+        if card.find_elements(By.XPATH, ".//button[contains(text(), 'Quero me candidatar')]"):
+            total_valid += 1
             
-    total_valid = len(valid_targets)
-    print(f"\n{Colors.BLUE}🔍 [Page Scraper]{Colors.END} Found {Colors.BOLD}{len(cards)}{Colors.END} total job cards. {Colors.BOLD}{total_valid}{Colors.END} are active for application.")
+    print(f"\n{Colors.BLUE}🔍 [Page Scraper]{Colors.END} Found {Colors.BOLD}{total_cards_count}{Colors.END} total job cards. {Colors.BOLD}{total_valid}{Colors.END} are active for application.")
     
     clicked_count = 0
     skipped_count = 0
     
-    for index, (card, button) in enumerate(valid_targets, start=1):
+    # 2. Iterate dynamically by index. This completely eliminates StaleElementReferenceExceptions
+    # because we query the DOM fresh for the exact card we need every iteration.
+    current_card_index = 0
+    valid_processed_count = 0
+    
+    while current_card_index < total_cards_count:
         try:
             close_possible_popups(driver)
+            
+            # Re-fetch the cards to ensure they are fresh in the DOM
+            current_cards = driver.find_elements(By.XPATH, "//li[@data-offer-item]")
+            if current_card_index >= len(current_cards):
+                break # DOM changed drastically, page probably refreshed
+                
+            card = current_cards[current_card_index]
+            
+            # Check if this card actually has an application button
+            buttons = card.find_elements(By.XPATH, ".//button[contains(text(), 'Quero me candidatar')]")
+            if not buttons:
+                current_card_index += 1
+                continue
+                
+            button = buttons[0]
+            valid_processed_count += 1
             
             # Get card text to check for senior keywords
             card_text = card.text
@@ -616,6 +702,7 @@ def process_page_buttons(driver) -> int:
                             matched_term = term.upper()
                             break
                     print(f"  {Colors.YELLOW}⏭ [SKIPPED]{Colors.END} Skipping Senior role: '{Colors.BOLD}{job_title}{Colors.END}' (Matched: {Colors.YELLOW}{matched_term}{Colors.END})")
+                current_card_index += 1
                 continue
                 
             driver.execute_script(
@@ -623,11 +710,13 @@ def process_page_buttons(driver) -> int:
                 button
             )
             time.sleep(0.5) 
-            print(f"  {Colors.CYAN}➤{Colors.END} Targeting: '{Colors.BOLD}{job_title}{Colors.END}' ({index}/{total_valid})... ", end="", flush=True)
+            print(f"  {Colors.CYAN}➤{Colors.END} Targeting: '{Colors.BOLD}{job_title}{Colors.END}' ({valid_processed_count}/{total_valid})... ", end="", flush=True)
             highlight_element(driver, button, color="#ff4393" if TEST_MODE else "#3624d6")
             
             try:
-                button.click()
+                # PHANTOM: Realistic behavioral interaction pattern (Hover -> Small Delay -> Click)
+                actions = ActionChains(driver)
+                actions.move_to_element(button).pause(random.uniform(0.1, 0.4)).click().perform()
                 print(f"{Colors.GREEN}✔ [CLICK]{Colors.END}")
                 clicked_count += 1
             except Exception as click_err:
@@ -635,8 +724,17 @@ def process_page_buttons(driver) -> int:
                     print(f"\n  {Colors.YELLOW}⚡ [INFO]{Colors.END} Click intercepted or failed. Clearing popups & retrying...")
                 close_possible_popups(driver)
                 time.sleep(0.6)
+                
+                # Because we cleared a popup, the DOM might have shifted. Re-fetch the exact button to prevent StaleElement!
+                current_cards = driver.find_elements(By.XPATH, "//li[@data-offer-item]")
+                if current_card_index < len(current_cards):
+                    retry_buttons = current_cards[current_card_index].find_elements(By.XPATH, ".//button[contains(text(), 'Quero me candidatar')]")
+                    if retry_buttons:
+                        button = retry_buttons[0]
+                        
                 try:
-                    button.click()
+                    actions = ActionChains(driver)
+                    actions.move_to_element(button).pause(0.2).click().perform()
                     print(f"{Colors.GREEN}✔ [CLICK (Retry)]{Colors.END}")
                     clicked_count += 1
                 except Exception:
@@ -656,8 +754,17 @@ def process_page_buttons(driver) -> int:
                 print(f"  {Colors.BLUE}⏳ [HUMAN DELAY]{Colors.END} Waiting {Colors.BOLD}{delay:.2f}{Colors.END} seconds...")
             time.sleep(delay)
             
+            current_card_index += 1
+            
+        except StaleElementReferenceException:
+            # The DOM shifted mid-loop. Just silently continue to the next iteration
+            # without incrementing the index so we re-evaluate this exact position.
+            if VERBOSE:
+                print(f"\n  {Colors.YELLOW}⚠️ [DOM Update]{Colors.END} Element went stale. Re-fetching DOM...")
+            continue
         except Exception as e:
-            print(f"\n  {Colors.RED}✘ [WARN]{Colors.END} Failed to process card {index}: {e}")
+            print(f"\n  {Colors.RED}✘ [WARN]{Colors.END} Failed to process card {current_card_index}: {e}")
+            current_card_index += 1
             
     print(f"\n{Colors.GREEN}✔ [Page Summary]{Colors.END} Applied: {Colors.BOLD}{clicked_count}{Colors.END} | Skipped Senior: {Colors.BOLD}{skipped_count}{Colors.END}")
     return clicked_count
