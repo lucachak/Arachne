@@ -21,24 +21,11 @@ from helpers.resume import meu_curriculo
 # ==========================================
 
 def gaussian_delay(center_s: float, sigma_s: float = 0.35, min_s: float = 0.2):
-    """
-    Delay com distribuição gaussiana — indistinguível de padrão humano real.
-    random.uniform() produz distribuição uniforme detectada por análise estatística.
-    Humanos seguem curva gaussiana com cauda longa (diståncias, leituras, distrações).
-    """
     delay = max(min_s, random.gauss(center_s, sigma_s))
     time.sleep(delay)
 
 
-# ==========================================
-# FIELD TYPE CLASSIFIER
-# ==========================================
-
 class FieldType(Enum):
-    """
-    Enum representando os tipos de campos de input que podem aparecer
-    num formulário do LinkedIn Easy Apply.
-    """
     TEXT_INPUT    = "text_input"     # <input type="text"> ou <input type="number">
     SELECT_DROPDOWN = "select"       # <select> — exige Select() do Selenium
     TEXTAREA      = "textarea"       # <textarea> — caixas de texto longas
@@ -116,21 +103,6 @@ class LinkedInScraper:
 
     @staticmethod
     def _classify_field(modal, input_id: str) -> tuple:
-        """
-        Classifica o tipo de campo de um formulário dado o `input_id` do label.
-
-        Retorna: (FieldType, element | None)
-        O elemento retornado é o input DOM encontrado, ou None em caso de falha.
-
-        Lógica de classificação:
-          1. Tenta localizar por ID direto.
-          2. Inspeciona tag_name e atributo `type`.
-          3. Se for <input>, diferencia: text/number → TEXT_INPUT, radio → RADIO_GROUP,
-             checkbox → CHECKBOX.
-          4. <select> → SELECT_DROPDOWN
-          5. <textarea> → TEXTAREA
-          6. Qualquer outro → UNKNOWN
-        """
         try:
             elem = modal.find_element(By.ID, input_id)
             tag = elem.tag_name.lower()
@@ -180,18 +152,7 @@ class LinkedInScraper:
 
     @staticmethod
     def _resolve_from_resume(text_lower: str) -> str | None:
-        """
-        Tenta encontrar uma resposta para a pergunta baseada nos dados do currículo.
-
-        Ordem de resolução:
-          1. Proficiência em idiomas  → meu_curriculo.languages
-          2. Anos de experiência com tecnologia → meu_curriculo.years_of_experience
-          3. Sumário geral / experiência descritiva → meu_curriculo.summary
-
-        Retorna a resposta como string, ou None se nenhuma regra bater.
-        """
         # ── 1. Idiomas ──
-        # Mapa de variações de keyword → chave em meu_curriculo.languages
         lang_keywords = {
             "inglês":     "English",
             "ingles":     "English",
@@ -238,18 +199,6 @@ class LinkedInScraper:
 
     @staticmethod
     def _human_click(driver, element) -> bool:
-        """
-        Clique humanizado com trajetória de aproximação e jitter.
-
-        O problema de execute_script('click'): dispara MouseEvent com clientX=0, clientY=0
-        — coordenadas impossíveis para um humano. LinkedIn e outros sistemas anti-bot
-        monitoram esses valores via event listeners nativos.
-
-        Esta função usa ActionChains nativo que gera eventos reais com coordenadas válidas:
-          1. Fase Abordagem: move o cursor para perto do elemento (simula chegada do mouse)
-          2. Fase Refinamento: micro-ajustes incrementais até o ponto de clique
-          3. Fase Clique: hesitação final + clique nativo (MouseEvent com clientX/Y reais)
-        """
         try:
             # Jitter: humanos nunca acertam o centro exato de um botão
             jitter_x = random.uniform(-5, 5)
@@ -280,7 +229,6 @@ class LinkedInScraper:
             actions.perform()
             return True
         except Exception:
-            # Fallback seguro caso o ActionChains falhe (elemento fora de tela, etc.)
             try:
                 driver.execute_script("arguments[0].click();", element)
             except Exception:
@@ -289,11 +237,6 @@ class LinkedInScraper:
 
     @staticmethod
     def _micro_wander(driver, intensity: int = 2):
-        """
-        Move o mouse levemente durante esperas longas.
-        Simula o usuário olhando para a tela enquanto aguarda carregamento.
-        Sem isso, o cursor fica completamente parado — padrão não-humano.
-        """
         try:
             actions = ActionChains(driver)
             for _ in range(intensity):
@@ -308,18 +251,6 @@ class LinkedInScraper:
 
     @staticmethod
     def _select_best_option(select: Select, preferred: str | None) -> bool:
-        """
-        Seleciona a melhor opção num <select> dado um valor preferido.
-
-        Lógica de matching (ordem de prioridade):
-          1. Match exato (case-insensitive)
-          2. Opção contém o `preferred` (ex: 'fluente' em 'Fluente / Nativo')
-          3. `preferred` contém o texto da opção (ex: 'Fluent' bate em 'Flu')
-          4. Heurística sim/não: procura 'sim'/'yes'
-          5. Fallback: index 1 (primeira opção real, pulando placeholder)
-
-        Retorna True se conseguiu selecionar algo, False caso contrário.
-        """
         opts = select.options
         real_opts = [o for o in opts if o.text.strip()]  # descarta placeholders vazios
         if not real_opts:
@@ -359,17 +290,7 @@ class LinkedInScraper:
 
     @staticmethod
     def answer_modal_questions(driver, modal, config):
-        """
-        Escaneia o painel atual por labels.
-        Classifica cada campo pelo tipo DOM, resolve a resposta correta via currículo,
-        e aplica a estratégia de preenchimento adequada por tipo.
 
-        Fluxo por campo:
-          1. Classificar tipo DOM (_classify_field)
-          2. Logar tipo detectado (_log_field_detection)
-          3. Tentar resolver resposta do currículo (_resolve_from_resume)
-          4. Aplicar resposta por tipo de campo
-        """
         try:
             labels = modal.find_elements(By.TAG_NAME, "label")
             for label in labels:
@@ -406,14 +327,12 @@ class LinkedInScraper:
                 # TEXT_INPUT
                 if field_type == FieldType.TEXT_INPUT:
                     if elem.get_attribute("value"):
-                        # Campo já preenchido, não sobrescreve
                         continue
                     if resolved:
                         elem.clear()
                         elem.send_keys(resolved)
                         print(f"          {Colors.CYAN}↳ Preenchido (resume):{Colors.END} '{resolved[:30]}'")
                     elif any(k in text_lower for k in ["há quantos", "ha quantos", "quantos anos", "how many", "years"]):
-                        # Fallback: número aleatório conservador
                         answer = str(random.randint(1, 3))
                         elem.clear()
                         elem.send_keys(answer)
@@ -462,7 +381,7 @@ class LinkedInScraper:
                             By.CSS_SELECTOR, f"input[type='radio'][name='{radio_name}']"
                         )
                         selected = False
-                        # Se temos resolved, tenta bater com os labels dos radios
+                        # Se resolved, tenta bater com os labels dos radios
                         if resolved:
                             res_lower = resolved.lower()
                             for r in all_radios:
@@ -523,11 +442,9 @@ class LinkedInScraper:
         print(f"{Colors.GREEN}{Colors.BOLD}[Arachne LinkedIn Scraper]{Colors.END} Operação 'Caminho da Raposa' Iniciada.")
         conf, credentials = load_env_configurations()
         
-        # Iniciando driver (headless mantido de acordo com a conf inicial do bot, falso por padrao para monitorar)
         driver = setup_driver(conf, headless=False)
         wait = WebDriverWait(driver, 12)
         
-        # Injeta o login autônomo e barra a execução se falhar completamente
         if not LinkedInScraper.login_to_linkedin(driver, credentials, conf):
             print(f"{Colors.RED}❌ [EXIT]{Colors.END} Falha na validação de login. Operação cancelada para evitar loop em páginas bloqueadas.")
             try:
@@ -550,23 +467,19 @@ class LinkedInScraper:
                 print(f"\n  {Colors.BLUE}📍 -> Navegando para página {page + 1}...{Colors.END}")
                 driver.get(page_url)
                 
-                # Defesa Lógica: Se fomos redirecionados para o login, a sessão nativa falhou.
                 current_url_lower = driver.current_url.lower()
                 if "login" in current_url_lower or "checkpoint" in current_url_lower:
                     print(f"  {Colors.RED}❌ [FATAL]{Colors.END} A sessão nativa foi derrubada ou interceptada (Login Wall/Captcha). Abortando a caçada atual.")
                     break
                 
-                # Explicit Wait: Aguardando o container principal carregar em vez de um sleep arbitrário
                 try:
-                    # Caminho da Raposa: Busca o container oficial (antigo e novo) ou qualquer link de vaga como evidência
                     wait.until(lambda d: d.find_elements(By.CSS_SELECTOR, "ul.scaffold-layout__list-container, .jobs-search-results-list, ul.jobs-search__results-list") or d.find_elements(By.XPATH, "//a[contains(@href, '/jobs/view/')]"))
                 except TimeoutException:
                     print(f"  {Colors.RED}❌ [Timeout]{Colors.END} A lista de vagas não carregou na página {page + 1}. Captcha ou fim da linha? Pulando.")
                     continue
                     
-                human_delay(2.5, 4.5) # Tempo extra para os cards renderizarem completamente (SPAs...)
+                human_delay(2.5, 4.5)
                 
-                # Buscando elementos de forma resiliente - Seletores velhos, novos e o Caminho do Rato (fallback)
                 xpath_selectors = [
                     "//li[contains(@class, 'jobs-search-results__list-item')]",
                     "//div[contains(@class, 'job-card-container')]",
@@ -590,7 +503,6 @@ class LinkedInScraper:
                 
                 for index in range(total_items):
                     try:
-                        # Buscando novamente para evitar StaleElementReferenceException (DOM updates são frequentes aqui)
                         current_cards = driver.find_elements(By.XPATH, " | ".join(xpath_selectors))
                         current_cards = list(dict.fromkeys(current_cards))
                         if index >= len(current_cards):
@@ -604,13 +516,10 @@ class LinkedInScraper:
                             gaussian_delay(0.4, 0.15, min_s=0.2)
                             continue
 
-                        # Scroll suave até o card
                         driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", card)
-                        # Pausa de "leitura" — tempo variável como usuário lendo título e empresa
                         gaussian_delay(1.0, 0.45, min_s=0.5)
                         LinkedInScraper._micro_wander(driver, intensity=1)
                         
-                        # Buscando o link exato da vaga, não a adivinhação de <ul> <li> <a> <span>
                         title_link = None
                         selectors = [
                             "a.job-card-list__title",
@@ -627,11 +536,9 @@ class LinkedInScraper:
                                 continue
                                 
                         if not title_link:
-                            # O Caminho da Serpente: Qualquer link que leve a /jobs/view/
                             try:
                                 title_link = card.find_element(By.XPATH, ".//a[contains(@href, '/jobs/view/')]")
                             except:
-                                # Fallback bruto (O Caminho do Rato, caso o layout tenha quebrado completamente)
                                 try:
                                     title_link = card.find_element(By.TAG_NAME, "a")
                                 except:
@@ -641,10 +548,8 @@ class LinkedInScraper:
                         title = title_link.text.strip() or "Vaga sem título"
                         print(f"    {Colors.DIM}- [{index + 1}/{total_items}]{Colors.END} Acessando: {Colors.BOLD}{title}{Colors.END}")
 
-                        # _human_click gera MouseEvent real (clientX/Y válidos) — sem JS inject
                         LinkedInScraper._human_click(driver, title_link)
                         
-                        # Tempo realista + micro-wander enquanto o painel da direita carrega
                         gaussian_delay(2.5, 0.6, min_s=1.8)
                         LinkedInScraper._micro_wander(driver, intensity=2)
                         
@@ -659,18 +564,15 @@ class LinkedInScraper:
                             
                             human_delay(1.5, 2.5)
                             
-                            # Iterando pelos painéis do Easy Apply (Candidatura Simplificada)
                             print(f"      {Colors.BLUE}🔄 Interagindo com o modal de candidatura...{Colors.END}")
                             
                             for step in range(10):  # Limite máximo de 10 telas para evitar loops infinitos
                                 try:
-                                    # Verifica se o modal ainda está aberto
                                     modal = driver.find_element(By.CSS_SELECTOR, "div[data-test-modal-id], div.jobs-easy-apply-modal, div[role='dialog']")
                                 except Exception:
                                     print(f"      {Colors.GREEN}✅ Modal finalizado ou fechado.{Colors.END}")
                                     break
                                 
-                                # Tenta pegar e printar o título do painel atual
                                 try:
                                     header = modal.find_element(By.CSS_SELECTOR, "h3, .pb4 h3, .artdeco-modal__header h3")
                                     print(f"        {Colors.CYAN}➡️ Painel [{step+1}]: {header.text.strip()}{Colors.END}")
@@ -678,14 +580,11 @@ class LinkedInScraper:
                                     pass
                                     
                                 human_delay(1.0, 2.0)
-                                LinkedInScraper._micro_wander(driver, intensity=1)  # cursor se move enquanto lê o painel
+                                LinkedInScraper._micro_wander(driver, intensity=1)
 
-                                # Aciona a heurística de preenchimento autônomo
                                 LinkedInScraper.answer_modal_questions(driver, modal, conf)
                                 
-                                # Procura pelos botões de avanço: Next, Avançar, Review, Revisar, Submit
                                 try:
-                                    # Botões primários geralmente têm a classe artdeco-button--primary
                                     primary_buttons = modal.find_elements(By.CSS_SELECTOR, "button.artdeco-button--primary")
                                     
                                     clicked = False
