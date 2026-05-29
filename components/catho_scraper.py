@@ -11,6 +11,7 @@ from selenium.common.exceptions import StaleElementReferenceException
 
 from components.config_loader import ScraperConfig, UserCredentials, load_env_configurations
 from components.browser_engine import setup_driver, highlight_element, close_possible_popups, Colors, print_banner
+from helpers.excel_logger import excel_logger
 
 def login_to_catho(driver, credentials: UserCredentials, config: ScraperConfig) -> bool:
     wait = WebDriverWait(driver, 15)
@@ -298,6 +299,7 @@ def process_page_buttons(driver, config: ScraperConfig) -> int:
             
             card_text = card.text
             job_title = "Vaga Desconhecida"
+            company_name = "Empresa Desconhecida"
             try:
                 title_elem = card.find_element(By.CSS_SELECTOR, "h2.title_offer a")
                 job_title = title_elem.text
@@ -305,6 +307,20 @@ def process_page_buttons(driver, config: ScraperConfig) -> int:
                 try:
                     title_elem = card.find_element(By.CSS_SELECTOR, "h2.title_offer")
                     job_title = title_elem.text
+                except Exception:
+                    pass
+
+            try:
+                company_elem = card.find_element(By.XPATH, ".//h2[contains(@class, 'title_offer')]/following-sibling::p")
+                if company_elem.text.strip():
+                    company_name = company_elem.text
+                else:
+                    company_elem = card.find_element(By.CSS_SELECTOR, "p")
+                    company_name = company_elem.text
+            except Exception:
+                try:
+                    company_elem = card.find_element(By.CSS_SELECTOR, "p")
+                    company_name = company_elem.text
                 except Exception:
                     pass
             
@@ -331,6 +347,7 @@ def process_page_buttons(driver, config: ScraperConfig) -> int:
                 actions.move_to_element(button).pause(random.uniform(0.1, 0.4)).click().perform()
                 print(f"{Colors.GREEN}✔ [CLICK]{Colors.END}")
                 clicked_count += 1
+                excel_logger.log_application(company_name, job_title)
             except Exception as click_err:
                 if config.VERBOSE:
                     print(f"\n  {Colors.YELLOW}⚡ [INFO]{Colors.END} Click intercepted or failed. Clearing popups & retrying...")
@@ -350,12 +367,14 @@ def process_page_buttons(driver, config: ScraperConfig) -> int:
                     actions.move_to_element(button).pause(0.2).click().perform()
                     print(f"{Colors.GREEN}✔ [CLICK (Retry)]{Colors.END}")
                     clicked_count += 1
+                    excel_logger.log_application(company_name, job_title)
                 except Exception:
                     if config.VERBOSE:
                         print(f"\n  {Colors.YELLOW}⚙ [JS FALLBACK]{Colors.END} Standard click blocked. Clicking button via JavaScript...")
                     driver.execute_script("arguments[0].click();", button)
                     print(f"{Colors.GREEN}✔ [CLICK (JS)]{Colors.END}")
                     clicked_count += 1
+                    excel_logger.log_application(company_name, job_title)
                     
             time.sleep(0.6)
             close_possible_popups(driver, config)
